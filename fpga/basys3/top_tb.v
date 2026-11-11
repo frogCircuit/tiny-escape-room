@@ -15,7 +15,7 @@ module top_tb;
   wire [6:0] seg; wire dp; wire [3:0] an; wire [15:0] led; wire [7:3] ja_out;
 
   top #(.CLK_HALF(2), .DEBOUNCE_CYCLES(40), .STRETCH_CYCLES(200)) dut (
-      .clk(clk), .sw(sw), .btnC(btnC), .btnD(btnD), .ja_in(3'b000),
+      .clk(clk), .sw(sw), .btnC(btnC), .btnD(btnD),
       .ja_out(ja_out), .seg(seg), .dp(dp), .an(an), .led(led));
 
   // active-low segment patterns for digits 0..2 (~{g,f,e,d,c,b,a})

@@ -2,12 +2,13 @@
  * Basys 3 board wrapper for tt_um_tiny_escape_room. NOT part of the Tiny Tapeout
  * submission; all board glue lives here.
  *
- *   sw[15:8]     -> ui_in[7:0]      btnC (debounced) or JA1 -> uio[0] submit
+ *   sw[15:8]     -> ui_in[7:0]      btnC (debounced) -> uio[0] submit
  *   btnD         -> reset (active-low rst_n inside)
- *   JA1..JA3     -> uio[0..2] inputs (submit, serial data, serial clock)
  *   JA4..JA10    -> uio[3..7] outputs (busy, serial out, buzzer, door, wrong)
  *   right digit  -> uo_out (the Basys display is active-low and multiplexed,
  *                   so segments are inverted and only one anode is held on)
+ *   uio[2:1] (serial in/clk) are tied low until the serial rooms (M3): an
+ *   unconnected Pmod input floats and fires phantom submits.
  *   led[15]/[14] -> wrong / door pulses, stretched so a human can see them
  *   led[13:8]    -> uio_out[5:0] directly; led[7:0] mirror the switches
  *   (SW0 to SW7 are unused: SW4 is dead on the author's board)
@@ -26,7 +27,6 @@ module top #(
     input  wire [15:8] sw,
     input  wire        btnC,
     input  wire        btnD,
-    input  wire [2:0]  ja_in,    // JA1, JA2, JA3
     output wire [7:3]  ja_out,   // JA4, JA7, JA8, JA9, JA10
     output wire [6:0]  seg,
     output wire        dp,
@@ -75,7 +75,7 @@ module top #(
   tt_um_tiny_escape_room dut (
       .ui_in  (sw[15:8]),
       .uo_out (uo_out),
-      .uio_in ({5'b00000, ja_in[2:1], btn_db | ja_in[0]}),
+      .uio_in ({5'b00000, 2'b00, btn_db}),
       .uio_out(uio_out),
       .uio_oe (uio_oe),
       .ena    (1'b1),
