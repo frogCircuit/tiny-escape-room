@@ -2,7 +2,7 @@
  * Basys 3 board wrapper for tt_um_tiny_escape_room. NOT part of the Tiny Tapeout
  * submission; all board glue lives here.
  *
- *   sw[7:0]      -> ui_in           btnC (debounced) or JA1 -> uio[0] submit
+ *   sw[15:8]     -> ui_in[7:0]      btnC (debounced) or JA1 -> uio[0] submit
  *   btnD         -> reset (active-low rst_n inside)
  *   JA1..JA3     -> uio[0..2] inputs (submit, serial data, serial clock)
  *   JA4..JA10    -> uio[3..7] outputs (busy, serial out, buzzer, door, wrong)
@@ -10,6 +10,7 @@
  *                   so segments are inverted and only one anode is held on)
  *   led[15]/[14] -> wrong / door pulses, stretched so a human can see them
  *   led[13:8]    -> uio_out[5:0] directly; led[7:0] mirror the switches
+ *   (SW0 to SW7 are unused: SW4 is dead on the author's board)
  *
  * The 100 MHz board clock is divided to the demo-board rate (CLK_HALF sets
  * the half period in board cycles: 50 -> 1 MHz).
@@ -22,7 +23,7 @@ module top #(
     parameter STRETCH_CYCLES  = 20_000_000   // 0.2 s at 100 MHz
 ) (
     input  wire        clk,
-    input  wire [7:0]  sw,
+    input  wire [15:8] sw,
     input  wire        btnC,
     input  wire        btnD,
     input  wire [2:0]  ja_in,    // JA1, JA2, JA3
@@ -72,7 +73,7 @@ module top #(
   // ---- the design under test ----
   wire [7:0] uo_out, uio_out, uio_oe;
   tt_um_tiny_escape_room dut (
-      .ui_in  (sw),
+      .ui_in  (sw[15:8]),
       .uo_out (uo_out),
       .uio_in ({5'b00000, ja_in[2:1], btn_db | ja_in[0]}),
       .uio_out(uio_out),
@@ -98,7 +99,7 @@ module top #(
     else if (wrong_cnt != 0) wrong_cnt <= wrong_cnt - 1'b1;
   end
 
-  assign led = {wrong_cnt != 0, door_cnt != 0, uio_out[5:0], sw};
+  assign led = {wrong_cnt != 0, door_cnt != 0, uio_out[5:0], sw[15:8]};
 
   wire _unused = &{uio_oe, 1'b0};
 endmodule

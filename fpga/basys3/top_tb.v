@@ -10,7 +10,7 @@ endmodule
 module top_tb;
   reg clk = 0;
   always #5 clk = ~clk;
-  reg [7:0] sw = 0;
+  reg [15:8] sw = 0;
   reg btnC = 0, btnD = 0;
   wire [6:0] seg; wire dp; wire [3:0] an; wire [15:0] led; wire [7:3] ja_out;
 
