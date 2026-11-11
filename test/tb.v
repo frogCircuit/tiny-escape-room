@@ -46,4 +46,24 @@ module tb ();
       .rst_n  (rst_n)     // not reset
   );
 
+`ifndef GL_TEST
+  // Unit-test access to blocks the top level cannot fully exercise yet.
+  // (Not present in the gate-level netlist, so excluded from GL tests.)
+  reg  [3:0]  disp_digit;
+  reg         disp_dp;
+  wire [7:0]  disp_out;
+  display u_disp_test (.digit(disp_digit), .dp(disp_dp), .seg_out(disp_out));
+
+  reg         sr_shift_en;
+  reg         sr_shift_in;
+  wire [31:0] sr_q;
+  reg  [7:0]  sr_a, sr_b;
+  wire        sr_match;
+  shared_regs u_shared_test (
+      .clk(clk), .rst_n(rst_n),
+      .shift_en(sr_shift_en), .shift_in(sr_shift_in), .shift_q(sr_q),
+      .cmp_a(sr_a), .cmp_b(sr_b), .match(sr_match)
+  );
+`endif
+
 endmodule

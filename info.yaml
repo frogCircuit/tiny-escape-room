@@ -18,6 +18,14 @@ project:
   # Don't forget to also update `PROJECT_SOURCES` in test/Makefile.
   source_files:
     - "project.v"
+    - "submit_edge.v"
+    - "free_counter.v"
+    - "consts.v"
+    - "shared_regs.v"
+    - "room_ctrl.v"
+    - "rooms/room0.v"
+    - "rooms/room1.v"
+    - "display.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
 # This section is for the datasheet/website. Use descriptive names (e.g., RX, TX, MOSI, SCL, SEG_A, etc.).
