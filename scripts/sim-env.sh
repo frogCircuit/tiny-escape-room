@@ -2,7 +2,7 @@
 # Source this before `make` in test/:  source scripts/sim-env.sh
 # The oss-cad-suite vvp/iverilog wrappers set PYTHONHOME, which breaks
 # cocotb's embedded Python. These shims call the real binaries instead.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 SUITE="$HOME/.apio/packages/oss-cad-suite"
 SHIM="$ROOT/.venv/sim-shim"
 mkdir -p "$SHIM"
