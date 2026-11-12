@@ -2,34 +2,44 @@
  * Basys 3 board wrapper for tt_um_tiny_escape_room. NOT part of the Tiny Tapeout
  * submission; all board glue lives here.
  *
- *   sw[15:8]     -> ui_in[7:0]      btnC (debounced) -> uio[0] submit
- *   btnD         -> reset (active-low rst_n inside)
+ *   sw[15:8]     -> ui_in[7:0]  (SW8 = bit 0 ... SW15 = bit 7; SW4 is dead on the author's board)
+ *   btnC         -> uio[0] submit (debounced)
+ *   btnR         -> uio[2] serial clock (debounced; one press = one rising edge)
+ *   SW0          -> uio[1] serial data
+ *   SW1          -> step mode: the design clock follows btnU (press = high, release = low)
+ *   SW2          -> slow mode: about 10 Hz, so a human can time room 4's busy pin
+ *   btnU         -> manual clock in step mode (room 3 needs single-stepping)
+ *   btnD         -> reset (hold it; in step mode also step the clock so the reset is seen)
  *   JA4..JA10    -> uio[3..7] outputs (busy, serial out, buzzer, door, wrong)
- *   right digit  -> uo_out (the Basys display is active-low and multiplexed,
- *                   so segments are inverted and the digits are scanned)
- *   next digit   -> segment g lights during a wrong-code flash
- *   uio[2:1] (serial in/clk) are tied low until the serial rooms (M3): an
- *   unconnected Pmod input floats and fires phantom submits.
- *   led[14]      -> door pulse, stretched so a human can see it
- *   led[13:8]    -> uio_out[5:0] directly; led[7:0] mirror the switches
- *   (SW0 to SW7 are unused: SW4 is dead on the author's board)
+ *   right digit  -> uo_out (the display is active-low and multiplexed, so segments are
+ *                   inverted and the digits are scanned); the next digit to the left lights
+ *                   segment g during a wrong-code flash
+ *   led[7:0]     -> mirror SW8..SW15      led[13:8] -> uio_out[5:0] (LED11 = busy,
+ *   LED12 = serial out, LED13 = buzzer)   led[14] -> door pulse, stretched
+ *   led[15]      -> the design clock (see it move in step and slow mode)
  *
- * The 100 MHz board clock is divided to the demo-board rate (CLK_HALF sets
- * the half period in board cycles: 50 -> 1 MHz).
+ * The 100 MHz board clock is divided to the demo-board rate (CLK_HALF sets the half
+ * period in board cycles: 50 -> 1 MHz). The Pmod serial inputs are not used: a floating
+ * pin fires phantom submits.
  */
 `default_nettype none
 
 module top #(
     parameter CLK_HALF        = 50,          // 100 MHz / (2*50) = 1 MHz
+    parameter SLOW_HALF       = 5_000_000,   // 100 MHz / (2*5M) = 10 Hz
     parameter DEBOUNCE_CYCLES = 2_000_000,   // 20 ms at 100 MHz
     parameter STRETCH_CYCLES  = 20_000_000,  // 0.2 s at 100 MHz
-    parameter SCAN_BIT        = 15           // display scan rate: 100 MHz / 2^(SCAN_BIT+1) per digit
+    parameter SCAN_BIT        = 15,          // display scan rate: 100 MHz / 2^(SCAN_BIT+1) per digit
+    parameter TICK_BITS       = 16           // animation step = 2^TICK_BITS design clocks
 ) (
     input  wire        clk,
     input  wire [15:8] sw,
+    input  wire [2:0]  mode_sw,   // SW0 data, SW1 step mode, SW2 slow mode
     input  wire        btnC,
     input  wire        btnD,
-    output wire [7:3]  ja_out,   // JA4, JA7, JA8, JA9, JA10
+    input  wire        btnR,
+    input  wire        btnU,
+    output wire [7:3]  ja_out,    // JA4, JA7, JA8, JA9, JA10
     output reg  [6:0]  seg,
     output reg         dp,
     output reg  [3:0]  an,
@@ -45,11 +55,31 @@ module top #(
   end
   wire rst_n = (por == 8'hFF) & ~rst_sync[1];
 
-  // ---- divide the board clock to the demo-board rate ----
-  reg [$clog2(CLK_HALF)-1:0] div = 0;
-  reg tt_clk_raw = 1'b0;
+  // ---- debounced buttons (wrapper only) ----
+  wire submit_db, sclk_db, step_db;
+  debounce #(.CYCLES(DEBOUNCE_CYCLES)) u_db_submit (.clk(clk), .in(btnC), .out(submit_db));
+  debounce #(.CYCLES(DEBOUNCE_CYCLES)) u_db_sclk   (.clk(clk), .in(btnR), .out(sclk_db));
+  debounce #(.CYCLES(DEBOUNCE_CYCLES)) u_db_step   (.clk(clk), .in(btnU), .out(step_db));
+
+  // ---- mode switches, synchronised ----
+  reg [1:0] step_sync = 2'b00, slow_sync = 2'b00;
   always @(posedge clk) begin
-    if (div == CLK_HALF - 1) begin
+    step_sync <= {step_sync[0], mode_sw[1]};
+    slow_sync <= {slow_sync[0], mode_sw[2]};
+  end
+  wire step_mode = step_sync[1];
+  wire slow_mode = slow_sync[1];
+
+  // ---- design clock: divided board clock, slow, or stepped by btnU ----
+  localparam DIV_W = $clog2(SLOW_HALF);
+  reg [DIV_W-1:0] div = 0;
+  reg tt_clk_raw = 1'b0;
+  wire [DIV_W-1:0] half = slow_mode ? SLOW_HALF - 1 : CLK_HALF - 1;
+  always @(posedge clk) begin
+    if (step_mode) begin
+      div        <= 0;
+      tt_clk_raw <= step_db;
+    end else if (div >= half) begin
       div        <= 0;
       tt_clk_raw <= ~tt_clk_raw;
     end else begin
@@ -59,25 +89,12 @@ module top #(
   wire tt_clk;
   BUFG u_bufg (.I(tt_clk_raw), .O(tt_clk));
 
-  // ---- debounce the submit button (wrapper only) ----
-  reg [1:0] btn_sync = 2'b00;
-  reg [$clog2(DEBOUNCE_CYCLES+1)-1:0] db_cnt = 0;
-  reg btn_db = 1'b0;
-  always @(posedge clk) begin
-    btn_sync <= {btn_sync[0], btnC};
-    if (btn_sync[1] == btn_db) db_cnt <= 0;
-    else if (db_cnt == DEBOUNCE_CYCLES) begin
-      btn_db <= btn_sync[1];
-      db_cnt <= 0;
-    end else db_cnt <= db_cnt + 1'b1;
-  end
-
   // ---- the design under test ----
   wire [7:0] uo_out, uio_out, uio_oe;
-  tt_um_tiny_escape_room dut (
+  tt_um_tiny_escape_room #(.TICK_BITS(TICK_BITS)) dut (
       .ui_in  (sw[15:8]),
       .uo_out (uo_out),
-      .uio_in ({5'b00000, 2'b00, btn_db}),
+      .uio_in ({5'b00000, sclk_db, mode_sw[0], submit_db}),
       .uio_out(uio_out),
       .uio_oe (uio_oe),
       .ena    (1'b1),
@@ -87,7 +104,7 @@ module top #(
 
   assign ja_out = uio_out[7:3];
 
-  // ---- LEDs: stretch the one-microsecond pulses so they can be seen ----
+  // ---- LEDs: stretch the one-microsecond door pulse so it can be seen ----
   reg [$clog2(STRETCH_CYCLES+1)-1:0] door_cnt = 0, wrong_cnt = 0;
   always @(posedge clk) begin
     if (uio_out[6]) door_cnt <= STRETCH_CYCLES;
@@ -96,12 +113,12 @@ module top #(
     else if (wrong_cnt != 0) wrong_cnt <= wrong_cnt - 1'b1;
   end
 
-  assign led = {1'b0, door_cnt != 0, uio_out[5:0], sw[15:8]};
+  assign led = {tt_clk_raw, door_cnt != 0, uio_out[5:0], sw[15:8]};
 
   // ---- display, time-multiplexed (active-low segments and anodes) ----
   // Right digit: the room number. Next digit to the left: only segment g, lit
-  // while a wrong-code flash is stretched. Red segments, so it is easy to tell
-  // apart from the green LEDs.
+  // while a wrong-code flash is stretched (red segments, easy to tell from the
+  // green LEDs).
   wire wrong_on = (wrong_cnt != 0);
   reg [SCAN_BIT:0] scan = 0;
   always @(posedge clk) begin
