@@ -9,7 +9,9 @@
 
 `default_nettype none
 
-module tt_um_tiny_escape_room (
+module tt_um_tiny_escape_room #(
+    parameter TICK_BITS = 16        // animation step = 2^TICK_BITS clocks (the testbench shortens it)
+) (
     input  wire [7:0] ui_in,    // Dedicated inputs: 8-bit DIP code and data
     output wire [7:0] uo_out,   // Dedicated outputs: seven-segment a..g, dp
     input  wire [7:0] uio_in,   // IOs: Input path
@@ -103,8 +105,9 @@ module tt_um_tiny_escape_room (
       .ser_out(r5_ser_out)
   );
 
-  // ---- display: room digit; decimal point stays off for now ----
-  display u_display (.digit(room), .dp(1'b0), .seg_out(uo_out));
+  // ---- display: room digit, with the animations on top ----
+  wire [7:0] room_seg;
+  display u_display (.digit(room), .dp(1'b0), .seg_out(room_seg));
 
   // ---- registered one-cycle pulses for the optional companion board ----
   reg door_q, wrong_q;
@@ -118,10 +121,17 @@ module tt_um_tiny_escape_room (
     end
   end
 
-  assign uio_out = {wrong_q, door_q, 1'b0, r5_ser_out, r4_busy, 3'b000};
+  wire buzzer;
+  anim #(.TICK_BITS(TICK_BITS)) u_anim (
+      .clk(clk), .rst_n(rst_n), .free_cnt(free_cnt), .submit(submit),
+      .door(door_q), .wrong(wrong_q), .idle_seg(room_seg[6:0]),
+      .seg_out(uo_out), .buzzer(buzzer)
+  );
+
+  assign uio_out = {wrong_q, door_q, buzzer, r5_ser_out, r4_busy, 3'b000};
 
   // List all unused inputs to prevent warnings (seed[7:0] is read from room 6 on;
   // shift_q[31:16] from room 7 on)
-  wire _unused = &{ena, uio_in[7:3], en[9:6], seed[7:0], shift_q[31:16], 1'b0};
+  wire _unused = &{ena, uio_in[7:3], en[9:6], seed[7:0], shift_q[31:16], room_seg[7], 1'b0};
 
 endmodule

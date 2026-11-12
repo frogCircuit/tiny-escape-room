@@ -28,7 +28,13 @@ module tb ();
 `endif
 
   // Replace tt_um_tiny_escape_room with your module name:
+  // RTL runs use a short animation step (2^10 clocks) so tests can wait for animations;
+  // the gate-level netlist keeps the real 2^16.
+`ifdef GL_TEST
   tt_um_tiny_escape_room user_project (
+`else
+  tt_um_tiny_escape_room #(.TICK_BITS(10)) user_project (
+`endif
 
       // Include power ports for the Gate Level test:
 `ifdef GL_TEST

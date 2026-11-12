@@ -86,6 +86,11 @@ def shown_digit(dut):
     return None
 
 
+def cur_room(dut):
+    """The room counter (RTL only: the display is animated, so it cannot be read at a glance)."""
+    return peek(dut, "room")
+
+
 def dp_on(dut):
     return (int(dut.uo_out.value) >> 7) & 1
 
@@ -138,7 +143,7 @@ async def send_frame(dut, value):
 async def goto_room2(dut):
     await solve_room0(dut)
     await solve_room1(dut)
-    assert shown_digit(dut) == 2
+    assert cur_room(dut) == 2
 
 
 # ---------------------------------------------------------------- pin plan
@@ -148,25 +153,24 @@ async def test_pin_plan(dut):
     await init(dut)
     assert int(dut.uio_oe.value) == 0b1111_1000
     assert int(dut.uio_out.value) & 0x3F == 0  # busy, serial out, buzzer idle
-    assert dp_on(dut) == 0
-    assert shown_digit(dut) == 0
+    assert (int(dut.uio_out.value) >> 5) & 1 == 0  # buzzer silent after reset
 
 
 # ------------------------------------------------------------------ room 0
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room0_solver(dut):
     await init(dut)
     doors = Pulses(dut, DOOR_BIT)
     if RTL:
         cocotb.start_soon(seed_monitor(dut))
-    assert shown_digit(dut) == 0
+    assert cur_room(dut) == 0
     await solve_room0(dut)
-    assert shown_digit(dut) == 1
+    assert cur_room(dut) == 1
     assert doors.n == 1
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room0_wrong_codes(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -174,14 +178,14 @@ async def test_room0_wrong_codes(dut):
     bad = [0x00, 0xFF] + [K0 ^ (1 << i) for i in range(8)]
     for n, code in enumerate(bad, start=1):
         await press(dut, code)
-        assert shown_digit(dut) == 0, f"code {code:#04x} opened the door"
+        assert cur_room(dut) == 0, f"code {code:#04x} opened the door"
         assert wrongs.n == n
         if RTL:
             assert peek(dut, "seed") == 0, "wrong code latched the seed"
     assert doors.n == 0
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_submit_is_edge_triggered(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -193,12 +197,12 @@ async def test_submit_is_edge_triggered(dut):
     # and the held button does not act again in room 1.
     await press(dut, K0, hold=50)
     assert doors.n == 1
-    assert shown_digit(dut) == 1
+    assert cur_room(dut) == 1
     assert peek_r1_state(dut) in (0, None)
     assert wrongs.n == 1
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_seed_follows_press_timing(dut):
     seeds = []
     for delay in (0, 7, 100, 1234):
@@ -207,7 +211,7 @@ async def test_seed_follows_press_timing(dut):
             cocotb.start_soon(seed_monitor(dut))
         await ClockCycles(dut.clk, delay)
         await solve_room0(dut)
-        assert shown_digit(dut) == 1
+        assert cur_room(dut) == 1
         if RTL:
             seeds.append(peek(dut, "seed"))
     if RTL:
@@ -217,30 +221,30 @@ async def test_seed_follows_press_timing(dut):
 
 # ------------------------------------------------------------------ room 1
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room1_ignored_in_room0(dut):
     await init(dut)
     for code in K1 + [S1]:
         await press(dut, code)
-    assert shown_digit(dut) == 0
+    assert cur_room(dut) == 0
     assert peek_r1_state(dut) in (0, None)
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room1_solver(dut):
     await init(dut)
     doors = Pulses(dut, DOOR_BIT)
     await solve_room0(dut)
     for i, code in enumerate(K1):
-        assert shown_digit(dut) == 1
+        assert cur_room(dut) == 1
         await press(dut, code)
         if RTL and i < 3:
             assert peek_r1_state(dut) == i + 1
-    assert shown_digit(dut) == 2
+    assert cur_room(dut) == 2
     assert doors.n == 2
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room1_shortcut(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -249,12 +253,12 @@ async def test_room1_shortcut(dut):
     await press(dut, S1)           # state 1 -> state 3
     assert peek_r1_state(dut) in (3, None)
     assert wrongs.n == 0, "the shortcut must not count as a wrong code"
-    assert shown_digit(dut) == 1
+    assert cur_room(dut) == 1
     await press(dut, K1[3])        # last code
-    assert shown_digit(dut) == 2
+    assert cur_room(dut) == 2
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room1_shortcut_only_from_state1(dut):
     for state in (0, 2, 3):
         await init(dut)
@@ -267,12 +271,12 @@ async def test_room1_shortcut_only_from_state1(dut):
             for code in K1[:state]:
                 await press(dut, code)
         await press(dut, S1)
-        assert shown_digit(dut) == 1, f"S1 opened the door from state {state}"
+        assert cur_room(dut) == 1, f"S1 opened the door from state {state}"
         assert peek_r1_state(dut) in (0, None), f"S1 stuck in state {state}"
         assert wrongs.n == 1
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room1_wrong_code_resets(dut):
     for state in range(4):
         await init(dut)
@@ -287,26 +291,26 @@ async def test_room1_wrong_code_resets(dut):
         # (From state 0 the "old next code" is K1[0], which is correct, so skip it.)
         if state >= 1:
             await press(dut, K1[state])
-            assert shown_digit(dut) == 1
+            assert cur_room(dut) == 1
             assert peek_r1_state(dut) in (0, None)
         # Starting over from state 0 still works.
         await solve_room1(dut)
-        assert shown_digit(dut) == 2
+        assert cur_room(dut) == 2
 
 
 # ------------------------------------------------------------------ room 2
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room2_solver(dut):
     await init(dut)
     doors = Pulses(dut, DOOR_BIT)
     await goto_room2(dut)
     await send_frame(dut, K2)
-    assert shown_digit(dut) == 3
+    assert cur_room(dut) == 3
     assert doors.n == 3
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room2_wrong_frames(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -315,32 +319,32 @@ async def test_room2_wrong_frames(dut):
     for bad in [0x0000, 0xFFFF] + [K2 ^ (1 << i) for i in range(16)]:
         await send_frame(dut, bad)
         n += 1
-        assert shown_digit(dut) == 2, f"frame {bad:#06x} opened the door"
+        assert cur_room(dut) == 2, f"frame {bad:#06x} opened the door"
         assert wrongs.n == n
     await send_frame(dut, K2)       # the right frame still works afterwards
-    assert shown_digit(dut) == 3
+    assert cur_room(dut) == 3
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room2_short_frame(dut):
     await init(dut)
     await goto_room2(dut)
     await send_bits(dut, K2 & 0x7FFF, 15)   # only 15 bits: the MSB is missing
     await press(dut, 0x00)
-    assert shown_digit(dut) == 2
+    assert cur_room(dut) == 2
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room2_last_16_bits_win(dut):
     await init(dut)
     await goto_room2(dut)
     await send_bits(dut, 0x5A5A5A, 24)       # junk first
     await send_bits(dut, K2, 16)             # last 16 bits are the frame
     await press(dut, 0x00)
-    assert shown_digit(dut) == 3
+    assert cur_room(dut) == 3
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room2_shifts_on_rising_edge_only(dut):
     await init(dut)
     await goto_room2(dut)
@@ -352,41 +356,41 @@ async def test_room2_shifts_on_rising_edge_only(dut):
     assert peek(dut, "shift_q") in (1, None)
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_serial_ignored_outside_room2(dut):
     await init(dut)
     await send_bits(dut, 0xFFFF, 16)         # room 0
     assert peek(dut, "shift_q") in (0, None)
-    assert shown_digit(dut) == 0
+    assert cur_room(dut) == 0
     await solve_room0(dut)
     await send_bits(dut, 0xFFFF, 16)         # room 1
     assert peek(dut, "shift_q") in (0, None)
     await press(dut, K1[0])
-    assert shown_digit(dut) == 1
+    assert cur_room(dut) == 1
 
 
 # ------------------------------------------------------------------- reset
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_reset_midgame(dut):
     await init(dut)
     await solve_room0(dut)
     await press(dut, K1[0])
     await press(dut, K1[1])
-    assert shown_digit(dut) == 1
+    assert cur_room(dut) == 1
     dut.rst_n.value = 0
     await ClockCycles(dut.clk, 3)
     dut.rst_n.value = 1
     await ClockCycles(dut.clk, 2)
-    assert shown_digit(dut) == 0
+    assert cur_room(dut) == 0
     assert peek(dut, "seed") in (0, None)
     assert peek_r1_state(dut) in (0, None)
     # Everything must be earned again from scratch.
     await press(dut, K1[2])
-    assert shown_digit(dut) == 0
+    assert cur_room(dut) == 0
     await solve_room0(dut)
     await solve_room1(dut)
-    assert shown_digit(dut) == 2
+    assert cur_room(dut) == 2
 
 
 # ----------------------------------------------- unit tests (RTL sim only)
@@ -440,12 +444,6 @@ SEROUT_BIT = 4
 C1 = 0x5C
 CMD_DUMP = 0xA5
 CMD_UNLOCK = 0x5A
-
-
-def cur_room(dut):
-    """The room counter (RTL), or the displayed digit (gate level)."""
-    r = peek(dut, "room")
-    return r if r is not None else shown_digit(dut)
 
 
 def password(seed):
@@ -555,7 +553,7 @@ async def to_room(dut, n):
 
 # ------------------------------------------------------------------ room 3
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room3_race_solver(dut):
     await init(dut)
     doors = Pulses(dut, DOOR_BIT)
@@ -565,7 +563,7 @@ async def test_room3_race_solver(dut):
     assert doors.n == 4
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room3_window_is_exactly_one_cycle(dut):
     wins = []
     for delay in range(1, 9):
@@ -577,7 +575,7 @@ async def test_room3_window_is_exactly_one_cycle(dut):
     assert wins == [3], f"race wins at delays {wins}, expected only the one-cycle window"
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room3_negative_cases(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -601,7 +599,7 @@ async def test_room3_negative_cases(dut):
 
 # ------------------------------------------------------------------ room 4
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room4_busy_time_leaks_correct_prefix(dut):
     await init(dut)
     runs = Runs(dut, BUSY_BIT)
@@ -616,7 +614,7 @@ async def test_room4_busy_time_leaks_correct_prefix(dut):
     assert cur_room(dut) == 4
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room4_solver_from_busy_timing_only(dut):
     await init(dut)
     runs = Runs(dut, BUSY_BIT)
@@ -630,7 +628,7 @@ async def test_room4_solver_from_busy_timing_only(dut):
         assert (recovered[0] ^ C1) == (seed >> 8)   # the player's route to seed_hi
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room4_failed_attempt_leaves_no_state(dut):
     await init(dut)
     runs = Runs(dut, BUSY_BIT)
@@ -643,7 +641,7 @@ async def test_room4_failed_attempt_leaves_no_state(dut):
     assert cur_room(dut) == 5
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room4_submits_ignored_while_busy(dut):
     await init(dut)
     runs = Runs(dut, BUSY_BIT)
@@ -661,7 +659,7 @@ async def test_room4_submits_ignored_while_busy(dut):
 
 # ------------------------------------------------------------------ room 5
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room5_solver_uses_the_dump(dut):
     await init(dut)
     doors = Pulses(dut, DOOR_BIT)
@@ -674,7 +672,7 @@ async def test_room5_solver_uses_the_dump(dut):
     assert doors.n == 6
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room5_dump_does_not_depend_on_seed(dut):
     dumps = []
     for delay in (0, 37, 513):
@@ -686,7 +684,7 @@ async def test_room5_dump_does_not_depend_on_seed(dut):
     assert len(set(dumps)) == 1, f"dump varies with the seed: {[hex(d) for d in dumps]}"
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room5_wrong_order_and_junk(dut):
     await init(dut)
     wrongs = Pulses(dut, WRONG_BIT)
@@ -707,7 +705,7 @@ async def test_room5_wrong_order_and_junk(dut):
     assert cur_room(dut) == 6
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room5_submit_resyncs_a_misaligned_stream(dut):
     await init(dut)
     await to_room(dut, 5)
@@ -721,7 +719,7 @@ async def test_room5_submit_resyncs_a_misaligned_stream(dut):
     assert cur_room(dut) == 6
 
 
-@cocotb.test()
+@cocotb.test(skip=not RTL)
 async def test_room5_unlock_byte_during_dump_is_ignored(dut):
     await init(dut)
     await to_room(dut, 5)
@@ -732,3 +730,124 @@ async def test_room5_unlock_byte_during_dump_is_ignored(dut):
     assert cur_room(dut) == 5
     await send_bits(dut, CMD_UNLOCK, 8)      # now it counts
     assert cur_room(dut) == 6
+
+
+# ============================================================ gate-level smoke
+
+@cocotb.test()
+async def test_gl_smoke_pulses(dut):
+    """Runs in RTL and gate-level: only the door and wrong pulse pins are watched."""
+    await init(dut)
+    wrongs = Pulses(dut, WRONG_BIT)
+    doors = Pulses(dut, DOOR_BIT)
+    await press(dut, 0x00)
+    assert wrongs.n == 1 and doors.n == 0
+    await press(dut, K0)
+    assert doors.n == 1
+    await press(dut, K1[0])
+    await press(dut, 0x00)
+    assert wrongs.n == 2
+
+
+# ============================================================ animations (RTL only)
+
+SIM_TICK = 1 << 10          # clocks per animation step in the RTL testbench (TICK_BITS = 10)
+
+
+async def record(dut, n):
+    """(uo_out, buzzer) once per clock for n clocks."""
+    frames = []
+    for _ in range(n):
+        await RisingEdge(dut.clk)
+        frames.append((int(dut.uo_out.value), (int(dut.uio_out.value) >> 5) & 1))
+    return frames
+
+
+def dedupe(seq):
+    out = []
+    for s in seq:
+        if not out or out[-1] != s:
+            out.append(s)
+    return out
+
+
+def toggles(bits):
+    return sum(1 for a, b in zip(bits, bits[1:]) if a != b)
+
+
+async def wait_idle(dut):
+    await ClockCycles(dut.clk, 14 * SIM_TICK)
+
+
+@cocotb.test(skip=not RTL)
+async def test_anim_reset_chase_is_silent_then_room0(dut):
+    cocotb.start_soon(Clock(dut.clk, 10, unit="us").start())
+    dut.ena.value = 1
+    dut.ui_in.value = 0
+    dut.uio_in.value = 0
+    dut.rst_n.value = 0
+    await ClockCycles(dut.clk, 3)
+    dut.rst_n.value = 1
+    frames = await record(dut, 9 * SIM_TICK)
+    shown = dedupe([f[0] for f in frames])
+    chase = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20]
+    assert [s for s in shown if s in chase] == chase, f"reset chase: {[hex(s) for s in shown]}"
+    assert shown[-1] == SEG[0], "room 0 digit after the reset chase"
+    assert not any(f[1] for f in frames), "reset chase must be silent"
+
+
+@cocotb.test(skip=not RTL)
+async def test_anim_door_chase_chime_and_decimal_point(dut):
+    await init(dut)
+    await wait_idle(dut)
+    dut.ui_in.value = K0
+    dut.uio_in.value = 1
+    await ClockCycles(dut.clk, 4)
+    dut.uio_in.value = 0
+    frames = await record(dut, 14 * SIM_TICK)
+    shown = dedupe([f[0] for f in frames])
+    one_lap = [0x01, 0x02, 0x04, 0x08, 0x10, 0x20]
+    assert shown == one_lap * 2 + [0x80 | SEG[1]], f"door frames: {[hex(s) for s in shown]}"
+    buzz = [f[1] for f in frames]
+    half = 6 * SIM_TICK
+    assert toggles(buzz[:half]) > 20, "chime note 1 missing"
+    assert toggles(buzz[half:2 * half]) > 10, "chime note 2 missing"
+    assert not any(buzz[2 * half + SIM_TICK:]), "buzzer must be silent after the chime"
+    assert dp_on(dut) == 1
+    # A new try clears the decimal point.
+    await press(dut, 0x00)
+    await ClockCycles(dut.clk, 10 * SIM_TICK)
+    assert dp_on(dut) == 0
+
+
+@cocotb.test(skip=not RTL)
+async def test_anim_wrong_blinks_twice_and_buzzes(dut):
+    await init(dut)
+    await wait_idle(dut)
+    dut.ui_in.value = 0x00
+    dut.uio_in.value = 1
+    await ClockCycles(dut.clk, 4)
+    dut.uio_in.value = 0
+    frames = await record(dut, 11 * SIM_TICK)
+    shown = dedupe([f[0] for f in frames])
+    assert shown == [0xFF, 0x00, 0xFF, 0x00, SEG[0]], f"wrong frames: {[hex(s) for s in shown]}"
+    buzz = [f[1] for f in frames]
+    assert toggles(buzz[:8 * SIM_TICK]) >= 3, "buzz missing"   # bit 11: ~4 toggles in 8 short steps
+    assert not any(buzz[9 * SIM_TICK:]), "buzzer must be silent afterwards"
+
+
+@cocotb.test(skip=not RTL)
+async def test_anim_never_blocks_input(dut):
+    """Rooms 0 to 3 are solved back to back while animations are running."""
+    await init(dut)
+    await to_room(dut, 3)
+    await solve_room3(dut)
+    assert cur_room(dut) == 4
+
+
+@cocotb.test(skip=not RTL)
+async def test_buzzer_silent_when_idle(dut):
+    await init(dut)
+    await wait_idle(dut)
+    frames = await record(dut, 5000)
+    assert not any(f[1] for f in frames)
