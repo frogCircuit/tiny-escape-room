@@ -57,7 +57,7 @@ module tb ();
   reg         sr_shift_en;
   reg         sr_shift_in;
   wire [31:0] sr_q;
-  reg  [7:0]  sr_a, sr_b;
+  reg  [15:0] sr_a, sr_b;
   wire        sr_match;
   shared_regs u_shared_test (
       .clk(clk), .rst_n(rst_n),

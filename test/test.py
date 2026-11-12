@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: © 2026 Fernando Valdez
 # SPDX-License-Identifier: Apache-2.0
 #
-# Tiny Escape Room, M1: rooms 0 and 1, reset, display, pin plan.
+# Tiny Escape Room: rooms 0 to 2, reset, display, pin plan.
 
 import os
 
@@ -13,6 +13,7 @@ from cocotb.triggers import ClockCycles, RisingEdge
 K0 = 0x3C
 K1 = [0x11, 0x6E, 0xA4, 0xD9]
 S1 = 0xFE
+K2 = 0xB3A5
 
 # {g,f,e,d,c,b,a} per digit, mirrored from src/display.v
 SEG = {
@@ -108,6 +109,36 @@ async def solve_room0(dut):
 async def solve_room1(dut):
     for code in K1:
         await press(dut, code)
+
+
+# uio_in bit 0 = submit, bit 1 = serial data, bit 2 = serial clock
+async def serial_bit(dut, b, hold=3):
+    """One serial clock pulse carrying bit b (data stable before the rising edge)."""
+    dut.uio_in.value = b << 1
+    await ClockCycles(dut.clk, hold)
+    dut.uio_in.value = (b << 1) | 0b100
+    await ClockCycles(dut.clk, hold)
+    dut.uio_in.value = b << 1
+    await ClockCycles(dut.clk, hold)
+
+
+async def send_bits(dut, value, nbits):
+    """Clock `nbits` of `value` in, MSB first."""
+    for i in range(nbits - 1, -1, -1):
+        await serial_bit(dut, (value >> i) & 1)
+    dut.uio_in.value = 0
+
+
+async def send_frame(dut, value):
+    """Clock a 16-bit frame in, then submit it."""
+    await send_bits(dut, value, 16)
+    await press(dut, 0x00)
+
+
+async def goto_room2(dut):
+    await solve_room0(dut)
+    await solve_room1(dut)
+    assert shown_digit(dut) == 2
 
 
 # ---------------------------------------------------------------- pin plan
@@ -263,6 +294,77 @@ async def test_room1_wrong_code_resets(dut):
         assert shown_digit(dut) == 2
 
 
+# ------------------------------------------------------------------ room 2
+
+@cocotb.test()
+async def test_room2_solver(dut):
+    await init(dut)
+    doors = Pulses(dut, DOOR_BIT)
+    await goto_room2(dut)
+    await send_frame(dut, K2)
+    assert shown_digit(dut) == 3
+    assert doors.n == 3
+
+
+@cocotb.test()
+async def test_room2_wrong_frames(dut):
+    await init(dut)
+    wrongs = Pulses(dut, WRONG_BIT)
+    await goto_room2(dut)
+    n = 0
+    for bad in [0x0000, 0xFFFF] + [K2 ^ (1 << i) for i in range(16)]:
+        await send_frame(dut, bad)
+        n += 1
+        assert shown_digit(dut) == 2, f"frame {bad:#06x} opened the door"
+        assert wrongs.n == n
+    await send_frame(dut, K2)       # the right frame still works afterwards
+    assert shown_digit(dut) == 3
+
+
+@cocotb.test()
+async def test_room2_short_frame(dut):
+    await init(dut)
+    await goto_room2(dut)
+    await send_bits(dut, K2 & 0x7FFF, 15)   # only 15 bits: the MSB is missing
+    await press(dut, 0x00)
+    assert shown_digit(dut) == 2
+
+
+@cocotb.test()
+async def test_room2_last_16_bits_win(dut):
+    await init(dut)
+    await goto_room2(dut)
+    await send_bits(dut, 0x5A5A5A, 24)       # junk first
+    await send_bits(dut, K2, 16)             # last 16 bits are the frame
+    await press(dut, 0x00)
+    assert shown_digit(dut) == 3
+
+
+@cocotb.test()
+async def test_room2_shifts_on_rising_edge_only(dut):
+    await init(dut)
+    await goto_room2(dut)
+    dut.uio_in.value = 0b110                 # data=1, clock rises and stays high
+    await ClockCycles(dut.clk, 50)
+    assert peek(dut, "shift_q") in (1, None), "held clock shifted more than once"
+    dut.uio_in.value = 0b010                 # falling edge: no shift
+    await ClockCycles(dut.clk, 10)
+    assert peek(dut, "shift_q") in (1, None)
+
+
+@cocotb.test()
+async def test_serial_ignored_outside_room2(dut):
+    await init(dut)
+    await send_bits(dut, 0xFFFF, 16)         # room 0
+    assert peek(dut, "shift_q") in (0, None)
+    assert shown_digit(dut) == 0
+    await solve_room0(dut)
+    await send_bits(dut, 0xFFFF, 16)         # room 1
+    assert peek(dut, "shift_q") in (0, None)
+    await press(dut, K1[0])
+    assert shown_digit(dut) == 1
+
+
 # ------------------------------------------------------------------- reset
 
 @cocotb.test()
@@ -310,7 +412,8 @@ async def test_display_decoder(dut):
 async def test_shared_regs(dut):
     await init(dut)
     # comparator
-    for a, b, eq in ((0x12, 0x12, 1), (0x12, 0x13, 0), (0x00, 0x00, 1), (0xFF, 0x7F, 0)):
+    for a, b, eq in ((0x12, 0x12, 1), (0x12, 0x13, 0), (0x00, 0x00, 1), (0xFF, 0x7F, 0),
+                     (0xB3A5, 0xB3A5, 1), (0xB3A5, 0xB3A4, 0), (0x33A5, 0xB3A5, 0), (0xFFFF, 0xFFFF, 1)):
         dut.sr_a.value = a
         dut.sr_b.value = b
         await cocotb.triggers.Timer(1, unit="ns")

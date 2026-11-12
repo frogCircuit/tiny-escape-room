@@ -1,8 +1,8 @@
 /*
  * Hardware idea: the datapath every room shares. One 32-bit shift register
  * (new bit enters at bit 0, so the first bit in ends up as the MSB after 32
- * shifts) and one 8-bit equality comparator. Rooms 0 and 1 only use the
- * comparator; the shift register is first used by room 2.
+ * shifts) and one 16-bit equality comparator. Rooms 0 and 1 compare an 8-bit
+ * code (zero-extended); room 2 compares the low 16 bits of the shift register.
  */
 `default_nettype none
 
@@ -14,8 +14,8 @@ module shared_regs (
     input  wire        shift_in,
     output reg  [31:0] shift_q,
     // comparator
-    input  wire [7:0]  cmp_a,
-    input  wire [7:0]  cmp_b,
+    input  wire [15:0] cmp_a,
+    input  wire [15:0] cmp_b,
     output wire        match
 );
   always @(posedge clk) begin

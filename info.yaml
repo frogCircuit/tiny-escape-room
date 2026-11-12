@@ -20,11 +20,13 @@ project:
     - "project.v"
     - "submit_edge.v"
     - "free_counter.v"
+    - "serial_in.v"
     - "consts.v"
     - "shared_regs.v"
     - "room_ctrl.v"
     - "rooms/room0.v"
     - "rooms/room1.v"
+    - "rooms/room2.v"
     - "display.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.
