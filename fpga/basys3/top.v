@@ -6,10 +6,11 @@
  *   btnD         -> reset (active-low rst_n inside)
  *   JA4..JA10    -> uio[3..7] outputs (busy, serial out, buzzer, door, wrong)
  *   right digit  -> uo_out (the Basys display is active-low and multiplexed,
- *                   so segments are inverted and only one anode is held on)
+ *                   so segments are inverted and the digits are scanned)
+ *   next digit   -> segment g lights during a wrong-code flash
  *   uio[2:1] (serial in/clk) are tied low until the serial rooms (M3): an
  *   unconnected Pmod input floats and fires phantom submits.
- *   led[15]/[14] -> wrong / door pulses, stretched so a human can see them
+ *   led[14]      -> door pulse, stretched so a human can see it
  *   led[13:8]    -> uio_out[5:0] directly; led[7:0] mirror the switches
  *   (SW0 to SW7 are unused: SW4 is dead on the author's board)
  *
@@ -21,16 +22,17 @@
 module top #(
     parameter CLK_HALF        = 50,          // 100 MHz / (2*50) = 1 MHz
     parameter DEBOUNCE_CYCLES = 2_000_000,   // 20 ms at 100 MHz
-    parameter STRETCH_CYCLES  = 20_000_000   // 0.2 s at 100 MHz
+    parameter STRETCH_CYCLES  = 20_000_000,  // 0.2 s at 100 MHz
+    parameter SCAN_BIT        = 15           // display scan rate: 100 MHz / 2^(SCAN_BIT+1) per digit
 ) (
     input  wire        clk,
     input  wire [15:8] sw,
     input  wire        btnC,
     input  wire        btnD,
     output wire [7:3]  ja_out,   // JA4, JA7, JA8, JA9, JA10
-    output wire [6:0]  seg,
-    output wire        dp,
-    output wire [3:0]  an,
+    output reg  [6:0]  seg,
+    output reg         dp,
+    output reg  [3:0]  an,
     output wire [15:0] led
 );
 
@@ -83,11 +85,6 @@ module top #(
       .rst_n  (rst_n)
   );
 
-  // ---- display: active-low, rightmost digit only ----
-  assign seg = ~uo_out[6:0];
-  assign dp  = ~uo_out[7];
-  assign an  = 4'b1110;
-
   assign ja_out = uio_out[7:3];
 
   // ---- LEDs: stretch the one-microsecond pulses so they can be seen ----
@@ -99,7 +96,26 @@ module top #(
     else if (wrong_cnt != 0) wrong_cnt <= wrong_cnt - 1'b1;
   end
 
-  assign led = {wrong_cnt != 0, door_cnt != 0, uio_out[5:0], sw[15:8]};
+  assign led = {1'b0, door_cnt != 0, uio_out[5:0], sw[15:8]};
+
+  // ---- display, time-multiplexed (active-low segments and anodes) ----
+  // Right digit: the room number. Next digit to the left: only segment g, lit
+  // while a wrong-code flash is stretched. Red segments, so it is easy to tell
+  // apart from the green LEDs.
+  wire wrong_on = (wrong_cnt != 0);
+  reg [SCAN_BIT:0] scan = 0;
+  always @(posedge clk) begin
+    scan <= scan + 1'b1;
+    if (!scan[SCAN_BIT]) begin
+      seg <= ~uo_out[6:0];
+      dp  <= ~uo_out[7];
+      an  <= 4'b1110;
+    end else begin
+      seg <= ~7'b1000000;                    // g only
+      dp  <= 1'b1;
+      an  <= wrong_on ? 4'b1101 : 4'b1111;   // blank unless flashing
+    end
+  end
 
   wire _unused = &{uio_oe, 1'b0};
 endmodule
