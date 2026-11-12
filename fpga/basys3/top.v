@@ -14,9 +14,16 @@
  *   right digit  -> uo_out (the display is active-low and multiplexed, so segments are
  *                   inverted and the digits are scanned); the next digit to the left lights
  *                   segment g during a wrong-code flash
- *   led[7:0]     -> mirror SW8..SW15      led[13:8] -> uio_out[5:0] (LED11 = busy,
+ *   led[7:0]     -> mirror SW8..SW15, or the room 4 ANSWER KEY while SW3 is up (see below)
+ *   led[13:8]    -> uio_out[5:0] (LED11 = busy,
  *   LED12 = serial out, LED13 = buzzer)   led[14] -> door pulse, stretched
  *   led[15]      -> the design clock (see it move in step and slow mode)
+ *
+ * ANSWER KEY (wrapper-only test aid, off by default, not part of the design): the wrapper keeps
+ * a copy of the design's free counter, captures the seed when the first door opens, and with
+ * SW3 up shows password byte P[i] on LED0..LED7 (LED0 = bit 0). i is set by SW6 (bit 1) and
+ * SW5 (bit 0). P[i] = (seed_hi ^ 0x5C) + i * 0x11. Solving room 4 by timing instead stays
+ * possible: watch LED11 in slow mode.
  *
  * The 100 MHz board clock is divided to the demo-board rate (CLK_HALF sets the half
  * period in board cycles: 50 -> 1 MHz). The Pmod serial inputs are not used: a floating
@@ -35,6 +42,8 @@ module top #(
     input  wire        clk,
     input  wire [15:8] sw,
     input  wire [2:0]  mode_sw,   // SW0 data, SW1 step mode, SW2 slow mode
+    input  wire        key_sw,    // SW3: show the room 4 answer key on the LEDs
+    input  wire [1:0]  key_idx,   // SW6, SW5: which password byte
     input  wire        btnC,
     input  wire        btnD,
     input  wire        btnR,
@@ -113,7 +122,31 @@ module top #(
     else if (wrong_cnt != 0) wrong_cnt <= wrong_cnt - 1'b1;
   end
 
-  assign led = {tt_clk_raw, door_cnt != 0, uio_out[5:0], sw[15:8]};
+  // ---- room 4 answer key (wrapper only) ----
+  // rcnt is a copy of the design's free counter (same clock, same reset). The design latches
+  // seed <= counter on the edge where door0 is high; door_q (uio_out[6]) is high one cycle
+  // later, when rcnt has moved on by one, so the seed is rcnt - 1.
+  reg [15:0] rcnt = 16'd0;
+  reg        seen_door = 1'b0;
+  reg [7:0]  seed_hi_cap = 8'd0;
+  wire [15:0] rcnt_m1 = rcnt - 16'd1;
+  always @(posedge tt_clk) begin
+    if (!rst_n) begin
+      rcnt        <= 16'd0;
+      seen_door   <= 1'b0;
+      seed_hi_cap <= 8'd0;
+    end else begin
+      rcnt <= rcnt + 16'd1;
+      if (uio_out[6] && !seen_door) begin
+        seen_door   <= 1'b1;
+        seed_hi_cap <= rcnt_m1[15:8];
+      end
+    end
+  end
+  wire [7:0] key = (seed_hi_cap ^ 8'h5C) + {2'b00, key_idx, 2'b00, key_idx};
+
+  assign led = {tt_clk_raw, door_cnt != 0, uio_out[5:0],
+                (key_sw & seen_door) ? key : sw[15:8]};
 
   // ---- display, time-multiplexed (active-low segments and anodes) ----
   // Right digit: the room number. Next digit to the left: only segment g, lit

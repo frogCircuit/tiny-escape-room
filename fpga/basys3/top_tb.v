@@ -14,11 +14,13 @@ module top_tb;
   reg [15:8] sw = 0;
   reg [2:0] mode_sw = 0;
   reg btnC = 0, btnD = 0, btnR = 0, btnU = 0;
+  reg key_sw = 0;
+  reg [1:0] key_idx = 0;
   wire [6:0] seg; wire dp; wire [3:0] an; wire [15:0] led; wire [7:3] ja_out;
 
   top #(.CLK_HALF(2), .SLOW_HALF(8), .DEBOUNCE_CYCLES(40), .STRETCH_CYCLES(800),
         .SCAN_BIT(3), .TICK_BITS(3)) dut (
-      .clk(clk), .sw(sw), .mode_sw(mode_sw), .btnC(btnC), .btnD(btnD), .btnR(btnR),
+      .clk(clk), .sw(sw), .mode_sw(mode_sw), .key_sw(key_sw), .key_idx(key_idx), .btnC(btnC), .btnD(btnD), .btnR(btnR),
       .btnU(btnU), .ja_out(ja_out), .seg(seg), .dp(dp), .an(an), .led(led));
 
   // active-low segment patterns for digits 0..3 (~{g,f,e,d,c,b,a})
@@ -75,6 +77,24 @@ module top_tb;
     begin for (i = 15; i >= 0; i = i - 1) serial_bit(v[i]); mode_sw[0] = 0; end
   endtask
 
+  // the answer key must equal the password the design derives from its own seed
+  task check_key;
+    integer i; reg [7:0] want;
+    begin
+      key_sw = 1;
+      for (i = 0; i < 4; i = i + 1) begin
+        key_idx = i; #100;
+        want = (dut.dut.seed[15:8] ^ 8'h5C) + 8'h11 * i;
+        if (led[7:0] !== want) begin
+          $display("FAIL: key[%0d] = %h, expected %h (seed %h)", i, led[7:0], want, dut.dut.seed);
+          errors = errors + 1;
+        end else $display("ok: answer key byte %0d = %h", i, led[7:0]);
+      end
+      key_sw = 0; #100;
+      if (led[7:0] !== sw[15:8]) begin $display("FAIL: LEDs do not mirror the switches with the key off"); errors = errors + 1; end
+    end
+  endtask
+
   initial begin
     #8000;                               // power-on reset, then the reset chase
     expect_digit(0, 0);
@@ -82,6 +102,7 @@ module top_tb;
     press(8'h00);  expect_wrong_flash(1);  #6000;  expect_digit(0, 0);  // wrong code
     #8000; expect_wrong_flash(0);        // the flash has ended
     press(8'h3C);  #6000;  expect_digit(1, 1);                           // room 0 -> door, dp lit
+    check_key;
     press(8'h11); press(8'h6E); press(8'hA4); press(8'hD9);
     #6000;  expect_digit(2, 1);                                          // room 1 -> door
     send16(16'hB3A5);                    // room 2: the frame over the serial controls
