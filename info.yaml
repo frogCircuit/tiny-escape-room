@@ -27,6 +27,9 @@ project:
     - "rooms/room0.v"
     - "rooms/room1.v"
     - "rooms/room2.v"
+    - "rooms/room3.v"
+    - "rooms/room4.v"
+    - "rooms/room5.v"
     - "display.v"
 
 # The pinout of your project. Leave unused pins blank. DO NOT delete or add any pins.

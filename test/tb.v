@@ -56,12 +56,15 @@ module tb ();
 
   reg         sr_shift_en;
   reg         sr_shift_in;
+  reg         sr_load_byte;
+  reg  [7:0]  sr_byte_in;
   wire [31:0] sr_q;
   reg  [15:0] sr_a, sr_b;
   wire        sr_match;
   shared_regs u_shared_test (
       .clk(clk), .rst_n(rst_n),
-      .shift_en(sr_shift_en), .shift_in(sr_shift_in), .shift_q(sr_q),
+      .shift_en(sr_shift_en), .shift_in(sr_shift_in),
+      .load_byte(sr_load_byte), .byte_in(sr_byte_in), .shift_q(sr_q),
       .cmp_a(sr_a), .cmp_b(sr_b), .match(sr_match)
   );
 `endif

@@ -4,7 +4,7 @@
  *
  * Tiny Escape Room, top level. Hardware idea: a room counter gates ten small
  * puzzles; they share one comparator and one shift register, and the display
- * shows which room is open. Rooms 0 to 2 so far.
+ * shows which room is open. Rooms 0 to 5 so far.
  */
 
 `default_nettype none
@@ -38,9 +38,10 @@ module tt_um_tiny_escape_room (
   // ---- room controller ----
   wire [3:0] room;
   wire [9:0] en;
-  wire       door0, door1, door2, wrong0, wrong1, wrong2;
-  wire       door_open = door0 | door1 | door2;
-  wire       wrong     = wrong0 | wrong1 | wrong2;
+  wire       door0, door1, door2, door3, door4, door5;
+  wire       wrong0, wrong1, wrong2, wrong3, wrong4, wrong5;
+  wire       door_open = door0 | door1 | door2 | door3 | door4 | door5;
+  wire       wrong     = wrong0 | wrong1 | wrong2 | wrong3 | wrong4 | wrong5;
   room_ctrl u_room_ctrl (.clk(clk), .rst_n(rst_n), .door_open(door_open), .room(room), .en(en));
 
   always @(posedge clk) begin
@@ -48,38 +49,61 @@ module tt_um_tiny_escape_room (
     else if (door0) seed <= free_cnt;
   end
 
-  // ---- constants, shared comparator and shift register ----
-  wire [2:0] r1_state;
-  wire [15:0] expected;
-  wire [7:0]  s1;
-  consts u_consts (.room(room), .r1_state(r1_state), .expected(expected), .s1(s1));
-
-  // serial input: strobe + data bit, shifted into the shared register in room 2
+  // ---- serial input: strobe + data bit, shifted into the shared register in rooms 2 and 5 ----
   wire serial_strobe, serial_bit;
   serial_in u_serial (
       .clk(clk), .rst_n(rst_n), .sclk(uio_in[2]), .sdata(uio_in[1]),
       .strobe(serial_strobe), .bit_in(serial_bit)
   );
 
-  wire        match;
+  // ---- constants, shared comparator and shift register ----
+  wire [2:0]  r1_state;
+  wire [1:0]  r4_idx, r5_state;
+  wire [15:0] expected;
+  wire [7:0]  s1;
+  consts u_consts (
+      .room(room), .r1_state(r1_state), .r4_idx(r4_idx), .seed_hi(seed[15:8]),
+      .r5_state(r5_state), .expected(expected), .s1(s1)
+  );
+
+  wire        match, r4_load;
+  wire [7:0]  r4_byte;
   wire [31:0] shift_q;
-  // rooms 0 and 1 compare the 8-bit switches (zero-extended); room 2 compares the frame
-  wire [15:0] cmp_a = en[2] ? shift_q[15:0] : {8'h00, ui_in};
+  // what the comparator looks at depends on the room
+  wire [15:0] cmp_a = en[2] ? shift_q[15:0] :
+                      en[4] ? {8'h00, r4_byte} :
+                      en[5] ? {8'h00, shift_q[7:0]} : {8'h00, ui_in};
   shared_regs u_shared (
       .clk(clk), .rst_n(rst_n),
-      .shift_en(serial_strobe & en[2]), .shift_in(serial_bit), .shift_q(shift_q),
+      .shift_en(serial_strobe & (en[2] | en[5])), .shift_in(serial_bit),
+      .load_byte(r4_load), .byte_in(ui_in), .shift_q(shift_q),
       .cmp_a(cmp_a), .cmp_b(expected), .match(match)
   );
 
   // ---- rooms ----
+  wire r4_busy, r5_ser_out;
   room0 u_room0 (.submit(submit), .en(en[0]), .match(match), .door_open(door0), .wrong(wrong0));
-  room2 u_room2 (.submit(submit), .en(en[2]), .match(match), .door_open(door2), .wrong(wrong2));
   room1 u_room1 (
       .clk(clk), .rst_n(rst_n), .submit(submit), .en(en[1]), .match(match),
       .code(ui_in), .s1(s1), .door_open(door1), .wrong(wrong1), .state(r1_state)
   );
+  room2 u_room2 (.submit(submit), .en(en[2]), .match(match), .door_open(door2), .wrong(wrong2));
+  room3 u_room3 (
+      .clk(clk), .rst_n(rst_n), .submit(submit), .en(en[3]), .ui_hi(ui_in[7:4]),
+      .door_open(door3), .wrong(wrong3)
+  );
+  room4 u_room4 (
+      .clk(clk), .rst_n(rst_n), .submit(submit), .en(en[4]), .shift_q(shift_q),
+      .match(match), .load_byte(r4_load), .cur_byte(r4_byte), .idx(r4_idx),
+      .busy(r4_busy), .door_open(door4), .wrong(wrong4)
+  );
+  room5 u_room5 (
+      .clk(clk), .rst_n(rst_n), .submit(submit), .en(en[5]), .strobe(serial_strobe),
+      .match(match), .room(room), .state(r5_state), .door_open(door5), .wrong(wrong5),
+      .ser_out(r5_ser_out)
+  );
 
-  // ---- display: room digit; decimal point stays off in M1 ----
+  // ---- display: room digit; decimal point stays off for now ----
   display u_display (.digit(room), .dp(1'b0), .seg_out(uo_out));
 
   // ---- registered one-cycle pulses for the optional companion board ----
@@ -94,9 +118,10 @@ module tt_um_tiny_escape_room (
     end
   end
 
-  assign uio_out = {wrong_q, door_q, 6'b000000};
+  assign uio_out = {wrong_q, door_q, 1'b0, r5_ser_out, r4_busy, 3'b000};
 
-  // List all unused inputs to prevent warnings (seed is read from room 4 on; shift_q[31:16] from room 7 on)
-  wire _unused = &{ena, uio_in[7:3], en[9:3], shift_q[31:16], seed, 1'b0};
+  // List all unused inputs to prevent warnings (seed[7:0] is read from room 6 on;
+  // shift_q[31:16] from room 7 on)
+  wire _unused = &{ena, uio_in[7:3], en[9:6], seed[7:0], shift_q[31:16], 1'b0};
 
 endmodule
