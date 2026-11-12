@@ -94,9 +94,12 @@ module tt_um_tiny_escape_room (
     end
   end
 
-  assign uio_out = {wrong_q, door_q, 6'b000000};
+  // MEASUREMENT HOOK (branch m2-measure only, never merged): keep the seed and the
+  // upper shift register bits alive so synthesis does not delete them. Rooms 4, 6, 9
+  // (seed) and room 7 (32-bit register) will use them for real.
+  assign uio_out = {wrong_q, door_q, ^seed, ^shift_q[31:16], 4'b0000};
 
   // List all unused inputs to prevent warnings (seed is read from room 4 on; shift_q[31:16] from room 7 on)
-  wire _unused = &{ena, uio_in[7:3], en[9:3], shift_q[31:16], seed, 1'b0};
+  wire _unused = &{ena, uio_in[7:3], en[9:3], 1'b0};
 
 endmodule
